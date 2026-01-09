@@ -3,13 +3,13 @@
 
 frappe.ui.form.on('ClefinCode WhatsApp Profile', {
 	refresh: function(frm){
-        frm.fields_dict['message_template'].get_query = function(doc) {
-            return {
-                filters:[{
-                    "whatsapp_profile": doc.name
-                    }                    
-                ]
-            }
-        }
+        // frm.fields_dict['message_template'].get_query = function(doc) {
+        //     return {
+        //         filters:[{
+        //             "whatsapp_profile": doc.name
+        //             }                    
+        //         ]
+        //     }
+        // }
     }
 });

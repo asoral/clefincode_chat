@@ -35,35 +35,65 @@ class ClefinCodeWhatsAppTemplate(Document):
                
                 if not getattr(profile, "business_account_id", None):
                     frappe.throw("WhatsApp Business Account ID not set on profile")
-                self.post_whatsapp_template_meta(profile)
+                self.post_whatsapp_template_meta()
             elif provider in ("twilio",):
-                self.post_whatsapp_template_twilio(profile)
+                self.post_whatsapp_template_twilio()
             else:
                 frappe.throw(f"Unknown whatsapp provider '{provider}' on profile {profile.name}")
 
         except Exception as e:
-            frappe.log_error(f"on_submit error for template {self.name}: {str(e)}", "ClefinCodeWhatsAppTemplate.on_submit")
+            frappe.log_error(message=f"on_submit error for template {self.name}: {str(e)}", title="ClefinCodeWhatsAppTemplate.on_submit")
             frappe.throw(str(e))
     
     def post_whatsapp_template_meta(self):
         try:
+            import time
             access_token = get_access_token()
             api_base = "https://graph.facebook.com/v23.0"
+
+            # First, check if template already exists
+            existing_template = self._check_existing_template(access_token, api_base)
+
+            if existing_template:
+                template_id = existing_template.get("id")
+                template_status = existing_template.get("status", "").upper()
+                existing_category = existing_template.get("category", "").upper()
+
+                # If template is approved, just link it to the current record
+                if template_status == "APPROVED":
+                    frappe.msgprint(f"Template '{self.meta_template_name}' already exists and is approved. Linking to existing template.", indicator="green")
+                    self.whatsapp_template_id = template_id
+                    self.template_status = template_status
+                    # Update category to match existing approved template
+                    if existing_category and existing_category != self.category.upper():
+                        self.category = existing_category
+                        frappe.msgprint(f"Updated category to '{existing_category}' to match existing approved template.", indicator="blue")
+                    self.save()
+                    frappe.db.commit()
+                    return
+
+                # If not approved, delete and recreate
+                frappe.msgprint(f"Template '{self.meta_template_name}' exists but is not approved (status: {template_status}). Deleting and recreating.", indicator="orange")
+                self._delete_template(template_id, access_token, api_base)
+                # Wait for deletion to complete
+                time.sleep(2)
+
+            # Create new template
             endpoint = f"{api_base}/{self.whatsapp_business_account_id}/message_templates"
 
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
             }
-            
+
             data = {
                 "name": self.meta_template_name,
-                "category": self.category,
+                "category": self.category.upper() if self.category else "MARKETING",
                 "language": self.template_language,
                 "components": [
                     {
                         "type": "BODY",
-                        "text": BeautifulSoup(self.body, 'html.parser').get_text()			
+                        "text": BeautifulSoup(self.body, 'html.parser').get_text()
                     },
                     {
                         "type": "BUTTONS",
@@ -81,21 +111,99 @@ class ClefinCodeWhatsAppTemplate(Document):
                 ]
             }
 
-            response = requests.post(endpoint, json=data, headers=headers)
-            if response.ok:
-                frappe.msgprint(f"WhatsApp message template <b><a href='/app/clefincode-whatsapp-template/{self.name}' target='_blank'>{self.meta_template_name}</a></b> has been created to proceed communication with the customer outside of the 24-hour window")	
-                response_data = response.json()	
-                self.whatsapp_template_id = response_data.get("id")
-                self.template_status = response_data.get("status")
-                self.save()
-                frappe.db.commit()
-            else:
-                frappe.throw(response.text)
-            
+            # Try to create with retries
+            max_retries = 3
+            retry_delay = 2
+
+            for attempt in range(max_retries):
+                response = requests.post(endpoint, json=data, headers=headers)
+                print("response:---->", response.text)
+
+                if response.ok:
+                    frappe.msgprint(f"WhatsApp message template <b><a href='/app/clefincode-whatsapp-template/{self.name}' target='_blank'>{self.meta_template_name}</a></b> has been created to proceed communication with the customer outside of the 24-hour window")
+                    response_data = response.json()
+                    self.whatsapp_template_id = response_data.get("id")
+                    self.template_status = response_data.get("status")
+                    self.save()
+                    frappe.db.commit()
+                    return
+
+                # Parse error response
+                try:
+                    error_data = response.json()
+                except:
+                    error_data = {}
+
+                error_subcode = error_data.get("error", {}).get("error_subcode")
+                error_msg = error_data.get("error", {}).get("error_user_msg", "")
+
+                # Error 2388025: Template being deleted or category mismatch
+                if error_subcode == 2388025:
+                    if "MARKETING" in error_msg and attempt < max_retries - 1:
+                        # If it suggests using MARKETING, try with that category
+                        if self.category.upper() != "MARKETING":
+                            frappe.msgprint(f"Switching category to MARKETING as suggested by Meta API.", indicator="orange")
+                            data["category"] = "MARKETING"
+                            self.category = "MARKETING"
+                            continue
+                        else:
+                            # Wait and retry
+                            frappe.msgprint(f"Template deletion in progress. Waiting {retry_delay} seconds before retry {attempt + 1}/{max_retries}...", indicator="yellow")
+                            time.sleep(retry_delay)
+                            continue
+                    elif attempt < max_retries - 1:
+                        # Wait and retry
+                        frappe.msgprint(f"Waiting {retry_delay} seconds before retry {attempt + 1}/{max_retries}...", indicator="yellow")
+                        time.sleep(retry_delay)
+                        continue
+
+                # If last attempt or different error, throw
+                if attempt == max_retries - 1:
+                    frappe.throw(response.text)
+
+        except frappe.ValidationError:
+            # Re-raise validation errors from frappe.throw
+            raise
         except Exception as e:
+            frappe.log_error(f"post_whatsapp_template_meta exception: {str(e)}", "post_whatsapp_template_meta")
             frappe.throw(str(e))
+
+    def _check_existing_template(self, access_token, api_base):
+        """Check if template already exists in Meta API. Returns template dict or None."""
+        try:
+            get_endpoint = f"{api_base}/{self.whatsapp_business_account_id}/message_templates"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            params = {"name": self.meta_template_name}
+
+            response = requests.get(get_endpoint, headers=headers, params=params)
+            if response.ok:
+                data = response.json()
+                templates = data.get("data", [])
+                if templates:
+                    return templates[0]
+            return None
+        except Exception as e:
+            frappe.log_error(f"Failed to check existing template: {str(e)}", "check_template_error")
+            return None
+
+    def _delete_template(self, template_id, access_token, api_base):
+        """Delete a template from Meta API"""
+        try:
+            delete_endpoint = f"{api_base}/{self.whatsapp_business_account_id}/message_templates"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            params = {"name": self.meta_template_name}
+
+            response = requests.delete(delete_endpoint, headers=headers, params=params)
+            if response.ok:
+                frappe.msgprint(f"Successfully deleted template '{self.meta_template_name}' from Meta.", indicator="blue")
+            else:
+                frappe.log_error(f"Failed to delete template: {response.text}", "delete_template_error")
+                frappe.msgprint(f"Warning: Could not delete existing template. Proceeding with creation.", indicator="yellow")
+        except Exception as e:
+            frappe.log_error(f"Exception deleting template: {str(e)}", "delete_template_exception")
+            frappe.msgprint(f"Warning: Could not delete existing template. Proceeding with creation.", indicator="yellow")
     
-    def post_whatsapp_template_twilio(self, profile):
+    def post_whatsapp_template_twilio(self):
         """
         Create Content template in Twilio and submit approval for WhatsApp.
         Updates: whatsapp_template_id (content SID), template_status
