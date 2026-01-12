@@ -150,59 +150,69 @@ _patchexecuted = False
 
 
 def _patch_db_set_value_for_value_change():
+
     def wrapped_set_value(doctype, name, field=None, val=None, *args, **kwargs):
-        
+
+        # 🔐 Always preserve original behavior first
+        if not doctype or not name:
+            return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
+
+        # Normalize values
         if isinstance(field, dict):
             values_dict = field
-        else:
+        elif field is not None:
             values_dict = {field: val}
+        else:
+            # IMPORTANT: no field info → don't interfere
+            return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
 
         fields = list(values_dict.keys())
 
+        # Guard against invalid fields
+        if not fields or any(f is None for f in fields):
+            return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
+
         notifications_map = get_notifications_map() or {}
         doctype_map = notifications_map.get(doctype, {})
-
         vc_notifications = doctype_map.get("Value Change", [])
 
-      
         if not vc_notifications:
             return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
 
-  
         try:
-            old_values = frappe.db.get_value(doctype, name, fields, as_dict=True) or {}
+            old_values = frappe.db.get_value(
+                doctype, name, fields, as_dict=True
+            ) or {}
         except Exception:
             old_values = {}
 
-     
-        result = _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
+        # Perform actual update
+        result = _ORIGINAL_DB_SET_VALUE(
+            doctype, name, field, val, *args, **kwargs
+        )
 
-  
-        changed_fields = []
-        for f in fields:
-            if old_values.get(f) != values_dict.get(f):
-                changed_fields.append(f)
+        # Detect changes
+        changed_fields = [
+            f for f in fields if old_values.get(f) != values_dict.get(f)
+        ]
 
-   
         if not changed_fields:
             return result
 
         try:
-           
             doc = frappe.get_doc(doctype, name)
-
-            
             doc._old_snapshot = old_values or {}
-
-         
             doc.run_method("on_change")
-
         except Exception:
-            frappe.log_error(frappe.get_traceback(), "Error in Value Change DB Patch")
+            frappe.log_error(
+                frappe.get_traceback(),
+                "Error in Value Change DB Patch"
+            )
 
         return result
 
     frappe.db.set_value = wrapped_set_value
+
 
 
 def _ensure_patch():
