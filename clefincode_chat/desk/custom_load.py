@@ -83,9 +83,11 @@ def get_docinfo(doc=None, doctype=None, name=None):
 	docinfo = frappe._dict(user_info={})
 
 	add_comments(doc, docinfo)
-	add_chat_topics(doc, docinfo)
+	if doc.doctype == "Task":
+		add_chat_topics(doc, docinfo)
+
 	# Ensure doc.name is always a string to avoid type issues when its int and we need it as string in other function
-	doc.name = str(doc.name)
+	doc.name = cstr(doc.name)
 	docinfo.update(
 		{
 			"doctype": doc.doctype,
@@ -107,6 +109,18 @@ def get_docinfo(doc=None, doctype=None, name=None):
 			"document_email": get_document_email(doc.doctype, doc.name),
 		}
 	)
+
+	if doc.doctype == "Task" and docinfo.energy_point_logs:
+		docinfo.energy_point_logs = [log for log in docinfo.energy_point_logs if log]
+		for log in docinfo.energy_point_logs:
+			log.update({
+				"format_form_log": True,
+				"is_timeline": True,
+				"doctype": "Energy Point Log", 
+				"icon": "star"
+			})
+			if not log.get("content"):
+				log["content"] = log.get("reason") or log.get("rule") or "Energy Point"
 
 	update_user_info(docinfo)
 	frappe.response["docinfo"] = docinfo
