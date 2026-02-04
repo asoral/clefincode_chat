@@ -31282,7 +31282,7 @@
         energy_point_timeline_contents.push({
           timeline_badge,
           creation: log.creation,
-          content: frappe.energy_points.format_form_log(log)
+          content: eps.energy_points.format_form_log(log)
         });
       });
       return energy_point_timeline_contents;
@@ -31536,4 +31536,4 @@
 //! momentjs.com
 //! version : 0.5.43
 //! version : 2.29.4
-//# sourceMappingURL=override.bundle.MCK2X4AW.js.map
+//# sourceMappingURL=override.bundle.WP76EHIR.js.map

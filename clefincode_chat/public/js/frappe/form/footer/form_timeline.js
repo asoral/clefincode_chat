@@ -502,7 +502,7 @@ class FormTimeline extends BaseTimeline {
       energy_point_timeline_contents.push({
         timeline_badge: timeline_badge,
         creation: log.creation,
-        content: frappe.energy_points.format_form_log(log),
+        content: eps.energy_points.format_form_log(log),
       });
     });
     return energy_point_timeline_contents;
