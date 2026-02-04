@@ -104,6 +104,9 @@ def get_docinfo(doc=None, doctype=None, name=None):
 			"energy_point_logs": get_point_logs(doc.doctype, doc.name),
 			"additional_timeline_content": get_additional_timeline_content(doc.doctype, doc.name),
 			"milestones": get_milestones(doc.doctype, doc.name),
+			"is_document_followed": is_document_followed(doc.doctype, doc.name, frappe.session.user),
+			"tags": get_tags(doc.doctype, doc.name),
+			"document_email": get_document_email(doc.doctype, doc.name),
 		}
 	)
 	
@@ -112,11 +115,6 @@ def get_docinfo(doc=None, doctype=None, name=None):
 			item for item in docinfo.additional_timeline_content 
 			if item and (item.get("content") or item.get("template"))
 		]
-			"is_document_followed": is_document_followed(doc.doctype, doc.name, frappe.session.user),
-			"tags": get_tags(doc.doctype, doc.name),
-			"document_email": get_document_email(doc.doctype, doc.name),
-		}
-	)
 
 	if doc.doctype == "Task" and docinfo.energy_point_logs:
 		docinfo.energy_point_logs = [log for log in docinfo.energy_point_logs if log]
