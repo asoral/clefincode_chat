@@ -167,8 +167,13 @@ def add_chat_topics(doc, docinfo):
 			"name": chat_topic_data.parent,
 			"owner": chat_topic_data.owner,
 			"subject": subject,
+			"content": subject,
 			"creation": chat_topic_data.creation,
 			"topic_status": chat_topic_data.topic_status,
+			"doctype": "ClefinCode Chat Topic",
+			"icon": "chat",
+			"is_timeline": True,
+			"format_form_log": True,
 		})
 
 
