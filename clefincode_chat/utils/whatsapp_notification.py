@@ -151,11 +151,11 @@ _patchexecuted = False
 
 def _patch_db_set_value_for_value_change():
 
-    def wrapped_set_value(doctype, name, field=None, val=None, *args, **kwargs):
+    def wrapped_set_value(dt, dn, field=None, val=None, *args, **kwargs):
 
         # 🔐 Always preserve original behavior first
-        if not doctype or not name:
-            return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
+        if not dt or not dn:
+            return _ORIGINAL_DB_SET_VALUE(dt, dn, field, val, *args, **kwargs)
 
         # Normalize values
         if isinstance(field, dict):
@@ -164,31 +164,31 @@ def _patch_db_set_value_for_value_change():
             values_dict = {field: val}
         else:
             # IMPORTANT: no field info → don't interfere
-            return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
+            return _ORIGINAL_DB_SET_VALUE(dt, dn, field, val, *args, **kwargs)
 
         fields = list(values_dict.keys())
 
         # Guard against invalid fields
         if not fields or any(f is None for f in fields):
-            return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
+            return _ORIGINAL_DB_SET_VALUE(dt, dn, field, val, *args, **kwargs)
 
         notifications_map = get_notifications_map() or {}
-        doctype_map = notifications_map.get(doctype, {})
+        doctype_map = notifications_map.get(dt, {})
         vc_notifications = doctype_map.get("Value Change", [])
 
         if not vc_notifications:
-            return _ORIGINAL_DB_SET_VALUE(doctype, name, field, val, *args, **kwargs)
+            return _ORIGINAL_DB_SET_VALUE(dt, dn, field, val, *args, **kwargs)
 
         try:
             old_values = frappe.db.get_value(
-                doctype, name, fields, as_dict=True
+                dt, dn, fields, as_dict=True
             ) or {}
         except Exception:
             old_values = {}
 
         # Perform actual update
         result = _ORIGINAL_DB_SET_VALUE(
-            doctype, name, field, val, *args, **kwargs
+            dt, dn, field, val, *args, **kwargs
         )
 
         # Detect changes
@@ -200,7 +200,7 @@ def _patch_db_set_value_for_value_change():
             return result
 
         try:
-            doc = frappe.get_doc(doctype, name)
+            doc = frappe.get_doc(dt, dn)
             doc._old_snapshot = old_values or {}
             doc.run_method("on_change")
         except Exception:
